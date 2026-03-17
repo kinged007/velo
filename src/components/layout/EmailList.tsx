@@ -368,7 +368,11 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     if (needsBuild) {
       const accounts = useAccountStore.getState().accounts;
       const account = accounts.find((a) => a.id === activeAccountId);
-      const userEmail = account?.email ?? "";
+      if (!account?.email) {
+        console.warn("[EmailList] Skipping people index build: account email not found");
+        return;
+      }
+      const userEmail = account.email;
 
       setPeopleIndexBuilding(true);
       try {

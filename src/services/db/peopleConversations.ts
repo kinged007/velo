@@ -9,6 +9,20 @@
 import { getDb } from "./connection";
 import type { DbMessage } from "./messages";
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+/** Prefix used to identify people conversation IDs, preventing collision with thread IDs. */
+export const PEOPLE_CONV_ID_PREFIX = "pconv:";
+
+/** Default number of messages to scan when building the index. */
+const DEFAULT_MESSAGE_LIMIT = 5000;
+
+/** Default lookback window for index builds (30 days in milliseconds). */
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Regex to strip plus-addressing from an email (e.g. "name+tag@domain" → "name@domain"). */
+const PLUS_ADDRESS_RE = /\+[^@]*@/;
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export interface PeopleConversation {
@@ -76,9 +90,9 @@ export function buildParticipantsKey(
   for (const addr of parseAddresses(ccAddresses)) all.add(addr);
 
   // Remove the user's own address(es) — support plus-addressing variants
-  const userBase = userEmail.toLowerCase().replace(/\+[^@]*@/, "@");
+  const userBase = userEmail.toLowerCase().replace(PLUS_ADDRESS_RE, "@");
   for (const addr of all) {
-    const addrBase = addr.replace(/\+[^@]*@/, "@");
+    const addrBase = addr.replace(PLUS_ADDRESS_RE, "@");
     if (addrBase === userBase) {
       all.delete(addr);
     }
@@ -133,9 +147,13 @@ export async function buildPeopleConversationIndex(
   userEmail: string,
   opts: BuildIndexOptions = {},
 ): Promise<void> {
+  if (!userEmail) {
+    console.warn("[peopleConversations] Skipping index build: userEmail is empty");
+    return;
+  }
   const db = await getDb();
-  const limit = opts.messageLimit ?? 5000;
-  const since = opts.sinceMs ?? Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const limit = opts.messageLimit ?? DEFAULT_MESSAGE_LIMIT;
+  const since = opts.sinceMs ?? Date.now() - THIRTY_DAYS_MS;
   const sinceSeconds = Math.floor(since / 1000);
 
   // Fetch messages — we need enough fields to derive participants
@@ -216,7 +234,7 @@ export async function buildPeopleConversationIndex(
   );
 
   for (const [key, accum] of convMap.entries()) {
-    const convId = `${accountId}:${key}`;
+    const convId = `${PEOPLE_CONV_ID_PREFIX}${accountId}:${key}`;
     const title = buildTitle(key, accum.displayNames);
 
     await db.execute(

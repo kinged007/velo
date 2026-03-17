@@ -37,6 +37,23 @@ function buildQuote(msg: DbMessage): string {
   </blockquote>`;
 }
 
+/** Build the "To" recipient list for a reply or reply-all. */
+function buildReplyToRecipients(msg: DbMessage, replyAll: boolean): string[] {
+  const replyTo = msg.reply_to ?? msg.from_address;
+  if (!replyAll) {
+    return replyTo ? [replyTo] : [];
+  }
+  const all = new Set<string>();
+  if (replyTo) all.add(replyTo);
+  if (msg.to_addresses) {
+    msg.to_addresses.split(",").forEach((a) => {
+      const t = a.trim();
+      if (t) all.add(t);
+    });
+  }
+  return Array.from(all);
+}
+
 const PAGE_SIZE = 20;
 
 export function PeopleConversationView({
@@ -140,24 +157,15 @@ export function PeopleConversationView({
 
   const handleReply = useCallback(() => {
     if (!lastMessage) return;
-    const to = defaultReplyMode === "replyAll"
-      ? (() => {
-          const replyTo = lastMessage.reply_to ?? lastMessage.from_address;
-          const all = new Set<string>();
-          if (replyTo) all.add(replyTo);
-          if (lastMessage.to_addresses) {
-            lastMessage.to_addresses.split(",").forEach((a) => all.add(a.trim()));
-          }
-          return Array.from(all);
-        })()
-      : [lastMessage.reply_to ?? lastMessage.from_address ?? ""].filter(Boolean);
 
-    const cc: string[] = defaultReplyMode === "replyAll" && lastMessage.cc_addresses
+    const isReplyAll = defaultReplyMode === "replyAll";
+    const to = buildReplyToRecipients(lastMessage, isReplyAll);
+    const cc: string[] = isReplyAll && lastMessage.cc_addresses
       ? lastMessage.cc_addresses.split(",").map((a) => a.trim())
       : [];
 
     openComposer({
-      mode: defaultReplyMode === "replyAll" ? "replyAll" : "reply",
+      mode: isReplyAll ? "replyAll" : "reply",
       to,
       cc,
       subject: `Re: ${lastMessage.subject ?? ""}`,

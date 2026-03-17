@@ -5,18 +5,16 @@ import { useThreadStore } from "@/stores/threadStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { useSelectedThreadId } from "@/hooks/useRouteNavigation";
 import {
+  PEOPLE_CONV_ID_PREFIX,
   getPeopleConversationById,
   type PeopleConversation,
 } from "@/services/db/peopleConversations";
 import { EmptyState } from "../ui/EmptyState";
 import { ReadingPaneIllustration } from "../ui/illustrations";
 
-/**
- * People conversation IDs use the format "{accountId}:{participantsKey}".
- * Thread IDs from Gmail / IMAP never contain a colon, so this heuristic is reliable.
- */
+/** Detect people conversation IDs by their explicit prefix. */
 function isPeopleConvId(id: string): boolean {
-  return id.includes(":");
+  return id.startsWith(PEOPLE_CONV_ID_PREFIX);
 }
 
 export function ReadingPane() {
