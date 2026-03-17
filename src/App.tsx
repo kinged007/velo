@@ -271,6 +271,12 @@ export default function App() {
           ui.setInboxViewMode(savedViewMode);
         }
 
+        // Restore inbox grouping mode
+        const savedGroupingMode = await getSetting("inbox_grouping_mode");
+        if (savedGroupingMode === "threads" || savedGroupingMode === "people") {
+          ui.setInboxGroupingMode(savedGroupingMode);
+        }
+
         // Restore reduce motion preference
         const savedReduceMotion = await getSetting("reduce_motion");
         if (savedReduceMotion === "true") {

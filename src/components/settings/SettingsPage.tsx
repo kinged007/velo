@@ -94,6 +94,8 @@ export function SettingsPage() {
   const setSendAndArchive = useUIStore((s) => s.setSendAndArchive);
   const inboxViewMode = useUIStore((s) => s.inboxViewMode);
   const setInboxViewMode = useUIStore((s) => s.setInboxViewMode);
+  const inboxGroupingMode = useUIStore((s) => s.inboxGroupingMode);
+  const setInboxGroupingMode = useUIStore((s) => s.setInboxGroupingMode);
   const reduceMotion = useUIStore((s) => s.reduceMotion);
   const setReduceMotion = useUIStore((s) => s.setReduceMotion);
   const accounts = useAccountStore((s) => s.accounts);
@@ -503,6 +505,18 @@ export function SettingsPage() {
                       >
                         <option value="unified">Unified</option>
                         <option value="split">Split (Categories)</option>
+                      </select>
+                    </SettingRow>
+                    <SettingRow label="Inbox grouping">
+                      <select
+                        value={inboxGroupingMode}
+                        onChange={(e) => {
+                          setInboxGroupingMode(e.target.value as "threads" | "people");
+                        }}
+                        className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none"
+                      >
+                        <option value="threads">By subject (Threads)</option>
+                        <option value="people">By people involved</option>
                       </select>
                     </SettingRow>
                     <ToggleRow
