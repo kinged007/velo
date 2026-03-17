@@ -775,6 +775,35 @@ const MIGRATIONS = [
     description: "Accept self-signed certificates for IMAP/SMTP",
     sql: `ALTER TABLE accounts ADD COLUMN accept_invalid_certs INTEGER DEFAULT 0;`,
   },
+  {
+    version: 24,
+    description: "People Conversations grouping tables",
+    sql: `
+      CREATE TABLE IF NOT EXISTS people_conversations (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        participants_key TEXT NOT NULL,
+        title TEXT,
+        last_message_at INTEGER NOT NULL DEFAULT 0,
+        unread_count INTEGER NOT NULL DEFAULT 0,
+        message_count INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        is_trashed INTEGER NOT NULL DEFAULT 0,
+        is_favorite INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_people_conv_account_date ON people_conversations(account_id, last_message_at DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_people_conv_account_key ON people_conversations(account_id, participants_key);
+
+      CREATE TABLE IF NOT EXISTS people_conversation_messages (
+        conversation_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        received_at INTEGER NOT NULL,
+        PRIMARY KEY (account_id, conversation_id, message_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_pcm_conv_date ON people_conversation_messages(account_id, conversation_id, received_at DESC);
+    `,
+  },
 ];
 
 /**

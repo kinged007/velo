@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { CSSTransition } from "react-transition-group";
 import { ThreadCard } from "../email/ThreadCard";
+import { PeopleConversationCard } from "../email/PeopleConversationCard";
 import { CategoryTabs } from "../email/CategoryTabs";
 import { SearchBar } from "../search/SearchBar";
 import { EmailListSkeleton } from "../ui/Skeleton";
@@ -20,8 +21,13 @@ import { useContextMenuStore } from "@/stores/contextMenuStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { getMessagesForThread } from "@/services/db/messages";
 import { getSmartFolderSearchQuery, mapSmartFolderRows, type SmartFolderRow } from "@/services/search/smartFolderQuery";
+import {
+  buildPeopleConversationIndex,
+  getPeopleConversations,
+  type PeopleConversation,
+} from "@/services/db/peopleConversations";
 import { getDb } from "@/services/db/connection";
-import { Archive, Trash2, X, Ban, Filter, ChevronRight, Package, FolderSearch } from "lucide-react";
+import { Archive, Trash2, X, Ban, Filter, ChevronRight, Package, FolderSearch, RefreshCw } from "lucide-react";
 import { EmptyState } from "../ui/EmptyState";
 import {
   InboxClearIllustration,
@@ -68,6 +74,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const activeSmartFolder = smartFolderId ? smartFolders.find((f) => f.id === smartFolderId) ?? null : null;
 
   const inboxViewMode = useUIStore((s) => s.inboxViewMode);
+  const inboxGroupingMode = useUIStore((s) => s.inboxGroupingMode);
   const routerCategory = useActiveCategory();
 
   // In split mode, use the router's category; in unified mode, always use "All"
@@ -86,6 +93,12 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const [heldThreadIds, setHeldThreadIds] = useState<Set<string>>(() => new Set());
   const [expandedBundles, setExpandedBundles] = useState<Set<string>>(() => new Set());
   const [bundleSummaries, setBundleSummaries] = useState<Map<string, { count: number; latestSubject: string | null; latestSender: string | null }>>(() => new Map());
+
+  // People conversations state
+  const [peopleConversations, setPeopleConversations] = useState<PeopleConversation[]>([]);
+  const [peopleLoading, setPeopleLoading] = useState(false);
+  const [peopleIndexBuilding, setPeopleIndexBuilding] = useState(false);
+  const [peopleHasMore, setPeopleHasMore] = useState(false);
 
   const openMenu = useContextMenuStore((s) => s.openMenu);
   const multiSelectCount = selectedThreadIds.size;
@@ -341,6 +354,66 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     loadThreads();
   }, [loadThreads]);
 
+  // ── People Conversations loading ──────────────────────────────────────────
+  const peopleIndexBuiltRef = useRef<string | null>(null); // tracks accountId for which index was built
+
+  const loadPeopleConversations = useCallback(async () => {
+    if (!activeAccountId) {
+      setPeopleConversations([]);
+      return;
+    }
+
+    // Build or refresh the index if we haven't done so for this account yet
+    const needsBuild = peopleIndexBuiltRef.current !== activeAccountId;
+    if (needsBuild) {
+      const accounts = useAccountStore.getState().accounts;
+      const account = accounts.find((a) => a.id === activeAccountId);
+      if (!account?.email) {
+        console.warn("[EmailList] Skipping people index build: account email not found");
+        return;
+      }
+      const userEmail = account.email;
+
+      setPeopleIndexBuilding(true);
+      try {
+        await buildPeopleConversationIndex(activeAccountId, userEmail);
+        peopleIndexBuiltRef.current = activeAccountId;
+      } catch (err) {
+        console.error("Failed to build people conversation index:", err);
+      } finally {
+        setPeopleIndexBuilding(false);
+      }
+    }
+
+    setPeopleLoading(true);
+    try {
+      const convs = await getPeopleConversations(activeAccountId, { limit: PAGE_SIZE });
+      setPeopleConversations(convs);
+      setPeopleHasMore(convs.length === PAGE_SIZE);
+    } catch (err) {
+      console.error("Failed to load people conversations:", err);
+    } finally {
+      setPeopleLoading(false);
+    }
+  }, [activeAccountId]);
+
+  useEffect(() => {
+    if (inboxGroupingMode !== "people") return;
+    loadPeopleConversations();
+  }, [inboxGroupingMode, loadPeopleConversations]);
+
+  // Refresh people conversations after sync (rebuild index to pick up new messages)
+  useEffect(() => {
+    if (inboxGroupingMode !== "people") return;
+    const handler = () => {
+      // Force index rebuild on next load
+      peopleIndexBuiltRef.current = null;
+      loadPeopleConversations();
+    };
+    window.addEventListener("velo-sync-done", handler);
+    return () => window.removeEventListener("velo-sync-done", handler);
+  }, [inboxGroupingMode, loadPeopleConversations]);
+
   // Stable thread ID key — only changes when the actual set of thread IDs changes, not on every array reference
   const threadIdKey = useMemo(() => threads.map((t) => t.id).join(","), [threads]);
 
@@ -513,7 +586,9 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
                   : userLabels.find((l) => l.id === activeLabel)?.name ?? activeLabel}
           </h2>
           <span className="text-xs text-text-tertiary">
-            {filteredThreads.length} conversation{filteredThreads.length !== 1 ? "s" : ""}
+            {inboxGroupingMode === "people"
+              ? `${peopleConversations.length} conversation${peopleConversations.length !== 1 ? "s" : ""}`
+              : `${filteredThreads.length} conversation${filteredThreads.length !== 1 ? "s" : ""}`}
           </span>
         </div>
         <select
@@ -585,9 +660,44 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
         </div>
       </CSSTransition>
 
-      {/* Thread list */}
+      {/* Thread list / People conversation list */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
-        {isLoading && threads.length === 0 ? (
+        {inboxGroupingMode === "people" ? (
+          // ── People Conversations mode ─────────────────────────────────────
+          peopleIndexBuilding ? (
+            <div className="flex flex-col items-center justify-center h-32 gap-2 text-sm text-text-secondary">
+              <RefreshCw className="w-5 h-5 animate-spin text-accent" />
+              <span>Building conversations index…</span>
+            </div>
+          ) : peopleLoading ? (
+            <EmailListSkeleton />
+          ) : peopleConversations.length === 0 ? (
+            <EmptyState illustration={InboxClearIllustration} title="No people conversations" subtitle="Switch to Threads mode or wait for emails to sync" />
+          ) : (
+            <>
+              {peopleConversations.map((conv, idx) => (
+                <div
+                  key={conv.id}
+                  className={idx < 15 ? "stagger-in" : undefined}
+                  style={idx < 15 ? { animationDelay: `${idx * 30}ms` } : undefined}
+                >
+                  <PeopleConversationCard
+                    conversation={conv}
+                    isSelected={conv.id === selectedThreadId}
+                    onClick={(c) => navigateToThread(c.id)}
+                  />
+                </div>
+              ))}
+              {peopleHasMore && (
+                <div className="px-4 py-3 text-center text-xs text-text-tertiary">
+                  Loading more…
+                </div>
+              )}
+            </>
+          )
+        ) : (
+          // ── Thread mode (default) ─────────────────────────────────────────
+          isLoading && threads.length === 0 ? (
           <EmailListSkeleton />
         ) : filteredThreads.length === 0 && bundleRules.length === 0 ? (
           <EmptyStateForContext
@@ -694,6 +804,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
               </div>
             )}
           </>
+        )
         )}
       </div>
     </div>
